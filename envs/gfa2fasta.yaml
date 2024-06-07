@@ -1,0 +1,14 @@
+name: gfatools
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+  - R
+dependencies:
+  - _libgcc_mutex=0.1=conda_forge
+  - _openmp_mutex=4.5=2_gnu
+  - gfatools=0.5=he4a0461_4
+  - libgcc-ng=13.1.0=he5830b7_0
+  - libgomp=13.1.0=he5830b7_0
+  - libzlib=1.2.13=hd590300_5
+prefix: /cluster/gjb_lab/pthorpe001/conda/envs/gfatools

@@ -1,0 +1,275 @@
+# Import necessary modules
+from glob import glob
+import os.path
+
+
+# Get the Conda environment prefix
+CONDA_PREFIX = os.environ['CONDA_PREFIX']
+
+# Define paths and samples
+BAKTA_DB_PATH = "/homes/pthorpe001/data/Davide_Bul_Aug2023_bacterial_genomes/db"
+SAMPLES = glob('data/*.fastq.gz')
+SAMPLES = [x.replace('.fastq.gz', '') for x in SAMPLES]
+SAMPLES = [os.path.splitext(os.path.basename(x))[0] for x in SAMPLES]
+
+# Define file patterns
+GFAS = expand("hifiasm_assemblies/{sample}/{sample}.bp.p_ctg.gfa", sample=SAMPLES)
+
+# Define paths for graph file assmebly output results
+HIFIASM_ASSEMBLIES = expand("hifiasm_assemblies/{sample}/{sample}.bp.p_ctg.gfa", sample=SAMPLES)
+
+# Define paths for fasta file assmebly output results/ after coverted from the graphs
+FASTA_FILE = expand("hifiasm_assemblies/{sample}/{sample}.fasta", sample=SAMPLES)
+
+
+
+
+
+BAKTA_DB = multiext('{}/antifam'.format(BAKTA_DB_PATH), '.h3f', '.h3i', '.h3m', '.h3p') + \
+    multiext('{}/ncRNA-genes'.format(BAKTA_DB_PATH), '.i1i', '.i1f', '.i1m', '.i1p') + \
+    multiext('{}/ncRNA-regions'.format(BAKTA_DB_PATH), '.i1i', '.i1f', '.i1m', '.i1p') + \
+    multiext('{}/rRNA'.format(BAKTA_DB_PATH), '.i1i', '.i1f', '.i1m', '.i1p') + \
+    multiext('{}/pfam'.format(BAKTA_DB_PATH), '.h3f', '.h3i', '.h3m', '.h3p') + \
+    ['{}/bakta.db'.format(BAKTA_DB_PATH),
+     '{}/expert-protein-sequences.dmnd'.format(BAKTA_DB_PATH),
+     '{}/sorf.dmnd'.format(BAKTA_DB_PATH),
+     '{}/oric.fna'.format(BAKTA_DB_PATH),
+     '{}/orit.fna'.format(BAKTA_DB_PATH),
+     '{}/rfam-go.tsv'.format(BAKTA_DB_PATH),
+     '{}/version.json'.format(BAKTA_DB_PATH)]
+
+AMRFINDER_DB = "/homes/pthorpe001/data/Davide_Bul_Aug2023_bacterial_genomes/db/amrfinderplus-db/latest/"
+
+ANNOTS = expand("annotated/{sample}/{sample}.tsv", sample=SAMPLES) + \
+         expand("annotated/{sample}/{sample}.gff3", sample=SAMPLES) + \
+         expand("annotated/{sample}/{sample}.gbff", sample=SAMPLES) + \
+         expand("annotated/{sample}/{sample}.embl", sample=SAMPLES) + \
+         expand("annotated/{sample}/{sample}.fna", sample=SAMPLES) + \
+         expand("annotated/{sample}/{sample}.ffn", sample=SAMPLES) + \
+         expand("annotated/{sample}/{sample}.faa", sample=SAMPLES) + \
+         expand("annotated/{sample}/{sample}.hypotheticals.tsv", sample=SAMPLES) + \
+         expand("annotated/{sample}/{sample}.txt", sample=SAMPLES) + \
+         expand("annotated/{sample}/{sample}.json", sample=SAMPLES)
+
+BANDAGE_IMGS = expand("assembly_viz/{sample}.png", sample=SAMPLES)
+
+BUSCOS = expand("busco/{sample}/short_summary.specific.bacteria_odb10.{sample}.txt", sample=SAMPLES)
+QUASTS = expand("quast/{sample}/report.txt", sample=SAMPLES)
+
+GTDBTK_CLASSIFICATIONS = expand("gtdbtk/{sample}/{sample}.classification.txt", sample=SAMPLES)
+
+ORTHOFINDER = "orthofinder"
+
+# Update the OUTPUTS to include the OrthoFinder directory  - removed ANTISMASH_HTML_TITLE +
+OUTPUTS = HIFIASM_ASSEMBLIES + BANDAGE_IMGS + ANNOTS + BUSCOS + QUASTS +  FASTA_FILE 
+         
+
+# Update the rule all to include this new rule and the updated OUTPUTS
+rule all:
+    input: OUTPUTS
+
+
+#######################
+# rules
+
+# Define rule for running Hifiasm
+rule hifiasm:
+    input:
+        fastq="data/{sample}.hifi_reads.fastq.gz"
+    output:
+        assembly="hifiasm_assemblies/{sample}/{sample}.bp.p_ctg.gfa"
+    params:
+        sample="{sample}"
+    shell:
+        """
+        mkdir -p hifiasm_assemblies/{params.sample}
+        hifiasm -f0 -t 16 -o hifiasm_assemblies/{params.sample}/{params.sample} {input.fastq} 
+        """
+
+
+# Define rule for converting GFA to Fasta
+rule gfa_to_fasta:
+    input:
+        gfa="hifiasm_assemblies/{sample}/{sample}.bp.p_ctg.gfa"
+    output:
+        fasta="hifiasm_assemblies/{sample}/{sample}.fasta"
+    conda:
+        "envs/gfa2fasta.yaml"
+    shell:
+        """
+        gfatools gfa2fa {input.gfa} > {output.fasta}
+        """
+
+
+# Define rule for downloading BAKTA database
+rule bakta_download:
+    output: BAKTA_DB
+    shell:
+        """
+        mkdir -p ${{CONDA_PREFIX}}/bakta_db
+        bakta_db download --output ${{CONDA_PREFIX}}/bakta_db
+        """
+
+
+# Define rule for downloading AMRFinder database
+rule amdfinder_download:
+    input: BAKTA_DB
+    output: AMRFINDER_DB
+    shell:
+        """
+        amrfinder_update --database ${{CONDA_PREFIX}}/bakta_db/db/amrfinderplus-db/
+        """
+
+
+rule annotate:
+    input:
+        contigs="hifiasm_assemblies/{sample}/{sample}.fasta",
+        db=AMRFINDER_DB
+    params:
+        sample="{sample}"
+    output:
+        multiext("annotated/{sample}/{sample}", '.tsv', '.gff3', '.gbff', 
+        '.embl', '.fna', '.ffn', '.faa', '.hypotheticals.tsv', '.txt', '.json')
+    shell:
+        """
+        filename_prefix=$(basename {input.contigs} .fasta)
+
+        wait
+        
+        # this to replace UNKNOWN when file names are sorted
+        modified_sample=$(echo "{params.sample}" | sed 's/_WGS_/_/' | sed 's/_//')
+
+        # removed:  --genus Bacillus --species subtilis --strain {params.sample} 
+
+        # some of the samples fail to plot, so the if fails, skip_plot
+        bakta --force --db /homes/pthorpe001/data/Davide_Bul_Aug2023_bacterial_genomes/db/ \
+        --prefix {params.sample} --output annotated/{params.sample} --threads 16 \
+         --compliant {input.contigs} --locus-tag $modified_sample 
+        
+        # Check the exit code of the previous command
+        if [ $? -ne 0 ]; then
+            # If the command failed, print a message and add --skip_plot
+            echo "Bakta failed for {params.sample}. Adding --skip_plot."
+            bakta --force --db /homes/pthorpe001/data/Davide_Bul_Aug2023_bacterial_genomes/db/ \
+            --prefix {params.sample} --output annotated/{params.sample} --threads 16 \
+            --compliant {input.contigs} --locus-tag $modified_sample  --skip-plot
+        fi
+        """
+
+
+rule bandage:
+    input: GFAS
+    output: BANDAGE_IMGS
+    shell:
+        """
+        mkdir $TMPDIR/XDG
+        chmod -R 0700 $TMPDIR
+        Xvfb :99 &
+        export DISPLAY=:99
+        export XDG_RUNTIME_DIR=$TMPDIR/XDG
+        for GFA in {input}; do
+            sample=$(dirname $GFA|sed 's|hifiasm_assemblies/||')
+            echo $sample
+            Bandage image $GFA assembly_viz/$sample.png --nodewidth 3  --names --fontsize 6
+        done
+        """
+
+rule busco:
+    input: "hifiasm_assemblies/{sample}/{sample}.fasta"
+    output: "busco/{sample}/short_summary.specific.bacteria_odb10.{sample}.txt"
+    params:
+        sample="{sample}"
+    conda: "envs/busco.yaml"
+    shell:
+        """
+        busco -m genome -l bacteria_odb10 -o busco/{params.sample} -i {input} -f
+        """
+
+
+# removed -r reference_data/NCIB3610.fasta  -L -r reference_data/NCIB3610.fasta
+
+rule quast:
+    input:
+        long_fq='data/{sample}.hifi_reads.fastq.gz',
+        assembly='hifiasm_assemblies/{sample}/{sample}.fasta'
+    output: "quast/{sample}/report.txt"
+    params:
+        sample="{sample}"
+    shell:
+        """
+        quast  \
+            --pacbio {input.long_fq} --circos -L  \
+            -o quast/{params.sample} {input.assembly}
+        """
+
+
+# Define rule for running GTDB-Tk classification
+rule gtdbtk_classify:
+    input:
+        genome="hifiasm_assemblies/{sample}/"
+    output:
+        classification="gtdbtk/{sample}/{sample}.classification.txt"
+    #conda:  # this wont play nicely with snakemake, so run using the hifi_assembly env, export path
+    #    "envs/gtdbtk-2.3.2.yml"
+    params:
+        sample="{sample}"
+    shell:
+        """
+        conda env config vars set GTDBTK_DATA_PATH="/cluster/gjb_lab/pthorpe001/conda/envs/gtdbtk-2.3.2/share/gtdbtk-2.3.2/db"
+        GTDBTK_DATA_PATH="/cluster/gjb_lab/pthorpe001/conda/envs/gtdbtk-2.3.2/share/gtdbtk-2.3.2/db"
+        wait
+        export PATH=$PATH:/cluster/gjb_lab/pthorpe001/conda/envs/gtdbtk-2.3.2/bin/
+        echo "Genome path: {input.genome}"
+        echo "Output path: {output.classification}"
+
+        /cluster/gjb_lab/pthorpe001/conda/envs/gtdbtk-2.3.2/bin/gtdbtk classify_wf --mash_db \
+        /cluster/gjb_lab/pthorpe001/conda/envs/gtdbtk-2.3.2/share/gtdbtk-2.3.2/db/  --cpu 16 \
+        --genome_dir {input.genome} --out_dir gtdbtk/{params.sample} --extension fasta --keep_intermediates
+
+
+        # --full_tree   requires more than 320GB RAM -  perhap ln -s all the fasta to a dir to run this one?
+        """
+
+
+
+# Rule to run OrthoFinder
+rule orthofinder:
+    input:
+        faa="orthofinder"
+    output:
+        results="orthofinder/OrthoFinder/Results/Orthogroups.tsv"
+    params:
+        output_dir="orthofinder/OrthoFinder"
+    conda:
+        "envs/orthofinder.yaml"  # Create a conda environment file for OrthoFinder
+    shell:
+        """
+        mkdir -p orthofinder
+        python create_links.py
+        wait
+
+        orthofinder -f orthofinder \
+        -t 16 \
+        -a 4 \
+        -M msa -A muscle -T iqtree
+        """
+
+
+# Define rule for running MultiQC
+rule multiqc:
+    output:
+        "multiqc_report.html"
+    conda: 
+        "envs/multiqc.yaml"
+    shell:
+        """
+        multiqc .
+        """
+
+MULTIQC = "multiqc_report.html"
+
+# Update the OUTPUTS to include the OrthoFinder directory
+
+         
+
+

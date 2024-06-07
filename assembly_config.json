@@ -1,0 +1,44 @@
+{
+	"hifiasm":
+	{
+		"jc" : "short",
+		"mem_free" : "32G",
+		"threads" : "16"
+	},
+	"amrfinderplus":
+	{
+		"jc" : "short",
+		"mem_free" : "32G",
+		"threads" : "16"
+	},
+	"orthofinder":
+	{
+		"jc" : "short",
+		"mem_free" : "32G",
+		"threads" : "16"
+	},
+	"antismash_report":
+	{
+		"jc" : "short",
+		"mem_free" : "32G",
+		"threads" : "16"
+	},
+	"gtdbtk_classify":
+	{
+		"jc" : "short",
+		"mem_free" : "52G",
+		"threads" : "16"
+	},
+	"annotate":
+	{
+		"jc": "short",
+		"mem_free": "16G",
+		"threads": "16"
+	},
+	"__default__":
+	{
+		"jc": "short",
+		"mem_free": "16G",
+		"threads": "1"
+	}
+}
